@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 from functools import partial
 import argparse
+import os
 
 # Prepare TAT dataset in such format (https://github.com/voidful/asr-training):
 """
@@ -13,19 +14,39 @@ path,text
 /xxx/7.wav,其實我最近在想
 """
 
+TAILO = "台羅"
+TAILONUM = "台羅數字調"
+TAIWEN = "漢羅台文"
+
+
 CLEAN_MAPPING = {
-    "﹖": "?",
-    "！": "!",
-    "％": "%",
-    "（": "(",
-    "）": ")",
-    "，": ",",
-    "：": ":",
-    "；": ";",
-    "？": "?",
-    "—": "--",
-    "─": "-",
+    TAILONUM:
+        {
+            "﹖": "?",
+            "！": "!",
+            "％": "%",
+            "（": "(",
+            "）": ")",
+            "，": ",",
+            "：": ":",
+            "；": ";",
+            "？": "?",
+            "—": "--",
+            "─": "-",
+        },
+    TAIWEN:
+        {
+            "﹖": "？",
+            "?": "？",
+            "!": "！",
+            "(": "（",
+            ")": "）",
+            ",": "，",
+            ":": "：",
+            ";": "；",
+        }
 }
+
 ACCEPTABLE_CHARS = (
     "0123456789"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -57,7 +78,7 @@ def get_transcription_from_json(json_path, transcript_type):
 
 
 def clean_text(txt, transcript_type):
-    if transcript_type == "台羅數字調":
+    if transcript_type == TAILONUM: #"台羅數字調"
         txt = txt.strip()
         txt = txt.replace("'", " ")
         txt = txt.replace('"', " ")
@@ -72,19 +93,37 @@ def clean_text(txt, transcript_type):
         if txt[-1] not in "?!.":
             txt += "."
         return txt
+    elif transcript_type == TAIWEN: #"漢羅台文"
+        if txt.endswith("，"):
+            txt = txt[:-1] + "。"
+        if txt[-1] not in "？。！":
+            txt += "。"
+        return txt
     else:
         raise NotImplementedError
 
 
-def validate_transcription(transcript, transcript_type, bad_count, verbose_fp=None):
+def validate_transcription(transcript, transcript_type, bad_count, tokenizer=None, verbose_fp=None):
     cleaned_transcript = transcript
-    if transcript_type == "台羅數字調":
-        for bad_char, good_char in CLEAN_MAPPING.items():
+    if transcript_type == TAILONUM: #"台羅數字調"
+        for bad_char, good_char in CLEAN_MAPPING[transcript_type].items():
             cleaned_transcript = cleaned_transcript.replace(bad_char, good_char)
         for c in cleaned_transcript:
             if c not in ACCEPTABLE_CHARS:
                 print(f"{bad_count + 1}\t{c}\t: {cleaned_transcript}", file=verbose_fp)
                 return None, bad_count + 1
+        return cleaned_transcript, bad_count
+    elif transcript_type == TAIWEN: #"漢羅台文"
+        for bad_char, good_char in CLEAN_MAPPING[transcript_type].items():
+            cleaned_transcript = cleaned_transcript.replace(bad_char, good_char)
+        
+        # Check by tokenizer
+        decoded_str = tokenizer.decode(tokenizer(cleaned_transcript)["input_ids"], skip_special_tokens=True)
+        
+        if cleaned_transcript != decoded_str:
+            print(f"{bad_count + 1}\t {cleaned_transcript}", file=verbose_fp)
+            return None, bad_count + 1
+        
         return cleaned_transcript, bad_count
     else:
         raise NotImplementedError
@@ -92,11 +131,23 @@ def validate_transcription(transcript, transcript_type, bad_count, verbose_fp=No
 
 
 def main(args):
+    tokenizer = None
     ############
     #  Config  #
     ############
     # args
-    transcript_type = "台羅數字調"  # 台羅 or 漢羅台文 or 台羅數字調
+    if args.transcript_type == "tailo":
+        transcript_type = TAILO #"台羅"
+    elif args.transcript_type == "taiwen":
+        transcript_type = TAIWEN #"漢羅台文"
+        from transformers import WhisperTokenizer
+        tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-medium", task="transcribe", language="chinese")
+    elif args.transcript_type == "tailonum":
+        transcript_type = TAILONUM #台羅數字調
+    else:
+        raise NotImplementedError
+    print(f"Transcript Type: {transcript_type}")
+
     wav_type = "condenser"
     TAT_root = args.TAT_root
     output_root = args.output_root
@@ -104,6 +155,7 @@ def main(args):
     # paths
     TAT_root = Path(TAT_root).resolve()
     output_root = Path(output_root).resolve()
+    os.makedirs(output_root, exist_ok=True)
     output_path = output_root / f"{TAT_root.name}.csv"
 
     TAT_txt_dir = TAT_root / "json"
@@ -130,7 +182,7 @@ def main(args):
     for idx, data in TAT_df[["wav_path", "transcription"]].iterrows():
         wav_path = data["wav_path"]
         transcript = data["transcription"]
-        result, bad_count = validate_transcription(transcript, transcript_type, bad_count)
+        result, bad_count = validate_transcription(transcript, transcript_type, bad_count, tokenizer)
         if result is not None:
             output_buffer.append(
                 [
@@ -152,5 +204,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--TAT_root", type=str, default="/storage/speech_dataset/TAT/TAT-Vol1-train")
     parser.add_argument("--output_root", type=str, default="../TAT-data")
+    parser.add_argument("--transcript_type", type=str, default="tailonum")
     args = parser.parse_args()
     main(args)
