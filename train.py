@@ -24,25 +24,29 @@ from module.data_processing import (
 from module.metric import cer_cal, wer_cal
 from module.utility import FreezingCallback
 
+from datetime import datetime
 
 def main(arg=None):
     input_arg, other_arg = parse_args(sys.argv[1:]) if arg is None else parse_args(arg)
     ############
     #  Config  #
     ############
-    input_arg["custom_set_train"] = "./TAT-data/TAT-Vol1-train.csv"
-    input_arg["custom_set_test"] = "./TAT-data/TAT-Vol1-eval.csv"
-    input_arg["tokenize_config"] = "openai/whisper-base"
-    input_arg["model_config"] = "openai/whisper-base"
-    input_arg["output_dir"] = "whisper-base_result/"
+    size = "small"
+    time = datetime.now().strftime('%Y%m%d-%H%M%S')
+    input_arg["custom_set_train"] = "./TAT-data/taiwen/TAT-Vol1-train.csv"
+    input_arg["custom_set_test"] = "./TAT-data/taiwen/TAT-Vol1-eval.csv"
+    input_arg["tokenize_config"] = f"openai/whisper-{size}"
+    input_arg["model_config"] = f"openai/whisper-{size}"
+    input_arg["output_dir"] = f"outputs/{time}"
     input_arg["group_by_length"] = True
-    # input_arg["load_cache"] = True
+    input_arg["load_cache"] = True
+    input_arg["epoch"] = 5
     # input_arg["batch"] = 4
 
     print("input_arg", input_arg)
     # repo_name = f"{input_arg['model_config']}-{input_arg['custom_set_train'] if 'custom_set_train' in input_arg else input_arg['train_subset']}"
     # repo_name = repo_name.replace("/", "_")
-    repo_name = f"{input_arg['model_config']}-TAT-Vol1"
+    repo_name = f"{input_arg['model_config']}-taiwen-TAT-Vol1"
 
     ############
     #  Model   #
@@ -63,11 +67,19 @@ def main(arg=None):
 
     if not input_arg.get("load_cache", False):
         # data set
-        dataset = load_dataset("csv", data_files=input_arg["custom_set_train"], cache_dir=input_arg["cache_dir"])
+        dataset = load_dataset(
+            "csv", 
+            data_files=input_arg["custom_set_train"], 
+            # cache_dir=input_arg["cache_dir"], 
+            cache_dir=None, 
+            )
         dataset = dataset.filter(lambda e: nlp2.is_file_exist(e["path"]))
         if "custom_set_test" in input_arg:
             dataset_test = load_dataset(
-                "csv", data_files=input_arg["custom_set_test"], cache_dir=input_arg["cache_dir"]
+                "csv", 
+                data_files=input_arg["custom_set_test"], 
+                # cache_dir=input_arg["cache_dir"],
+                cache_dir=None,
             )
             dataset_test = dataset_test.filter(lambda e: nlp2.is_file_exist(e["path"]))
             data_test = dataset_test["train"]
@@ -151,15 +163,15 @@ def main(arg=None):
     ################
     #    Sample    #
     ################
-    sample_text = "tsu7-tsi2 ti7 to2-ui7?"
-    labels = processor.tokenizer(sample_text)["input_ids"]
-    decoded_with_special = processor.tokenizer.decode(labels, skip_special_tokens=False)
-    decoded_str = processor.tokenizer.decode(labels, skip_special_tokens=True)
+    # sample_text = "tsu7-tsi2 ti7 to2-ui7?"
+    # labels = processor.tokenizer(sample_text)["input_ids"]
+    # decoded_with_special = processor.tokenizer.decode(labels, skip_special_tokens=False)
+    # decoded_str = processor.tokenizer.decode(labels, skip_special_tokens=True)
 
-    print(f"Input:                 {sample_text}")
-    print(f"Decoded w/ special:    {decoded_with_special}")
-    print(f"Decoded w/out special: {decoded_str}")
-    print(f"Are equal:             {sample_text == decoded_str}")
+    # print(f"Input:                 {sample_text}")
+    # print(f"Decoded w/ special:    {decoded_with_special}")
+    # print(f"Decoded w/out special: {decoded_str}")
+    # print(f"Are equal:             {sample_text == decoded_str}")
 
     ################
     #     Train    #
@@ -200,6 +212,7 @@ def main(arg=None):
         save_total_limit=input_arg.get("save_total_limit", 5),
         push_to_hub=False,
         report_to="all",
+        weight_decay=input_arg.get("weight_decay", 0.02),
     )
 
     training_args.predict_with_generate = True
@@ -216,7 +229,7 @@ def main(arg=None):
         cer = cer_cal(label_str, pred_str)
         wer = wer_cal(label_str, pred_str)
         pred_result = [[l, p, cer_cal([l], [p])] for l, p in zip(label_str, pred_str)]
-        nlp2.write_csv(pred_result, "pred.csv")
+        nlp2.write_csv(pred_result, f"pred_{time}.csv")
         # print 10 predict result randomly for debug
         random.shuffle(pred_result)
         print("pred_result")

@@ -38,6 +38,7 @@ def parse_args(args):
     parser.add_argument("--warmup_steps", type=int)
     parser.add_argument("--save_total_limit", type=int)
     parser.add_argument("--only_eval", action="store_true")
+    parser.add_argument("--weight_decay", type=float)
     input_arg, model_arg = parser.parse_known_args(args)
     input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
     other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}
